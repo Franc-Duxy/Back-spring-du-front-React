@@ -18,6 +18,9 @@ import java.util.stream.Collectors; // Ajout de cette ligne
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.ArrayList;
 
 @Service
 public class GestionCommandeProduit {
@@ -50,40 +53,77 @@ public class GestionCommandeProduit {
             throw new IllegalArgumentException("Les IDs de commande et de produit doivent être spécifiés.");
         }
 
+        if (commandeProduit.getQuantite() <= 0) {
+            logger.warn("Tentative d'ajout avec quantité invalide : {}", commandeProduit.getQuantite());
+            throw new IllegalArgumentException("La quantité doit être supérieure à zéro");
+        }
+
         Commande commande = commandeRepository.findById(commandeProduit.getIdCommande())
                 .orElseThrow(() -> new IllegalArgumentException("Commande introuvable : " + commandeProduit.getIdCommande()));
+
         Produit produit = produitRepository.findById(commandeProduit.getIdProduit())
                 .orElseThrow(() -> new IllegalArgumentException("Produit introuvable : " + commandeProduit.getIdProduit()));
 
-        if (commandeProduit.getQuantite() < 0) {
-            logger.warn("Tentative d'ajout avec quantité négative : {}", commandeProduit.getQuantite());
-            throw new IllegalArgumentException("La quantité ne peut pas être négative");
+        // Vérifier si le produit existe déjà dans la commande
+        CommandeProduitId idExistant = new CommandeProduitId(commandeProduit.getIdCommande(), commandeProduit.getIdProduit());
+        Optional<CommandeProduit> existing = commandeProduitRepository.findById(idExistant);
+
+        if (existing.isPresent()) {
+            // Produit déjà dans la commande → on additionne la quantité
+            CommandeProduit cp = existing.get();
+            int nouvelleQuantite = cp.getQuantite() + commandeProduit.getQuantite();
+
+            // Vérifier le stock
+            if (produit.getStock() < commandeProduit.getQuantite()) {
+                throw new IllegalArgumentException("Stock insuffisant pour ajouter " + commandeProduit.getQuantite() +
+                        " unités. Stock actuel : " + produit.getStock());
+            }
+
+            // Mettre à jour
+            produit.setStock(produit.getStock() - commandeProduit.getQuantite());
+            cp.setQuantite(nouvelleQuantite);
+            cp.setPrixTotal(produit.getPrix().multiply(BigDecimal.valueOf(nouvelleQuantite)));
+
+            CommandeProduit saved = commandeProduitRepository.saveAndFlush(cp);
+
+            // Mise à jour du total de la commande
+            commandeRepository.updateTotalById(commande.getIdCommande());
+
+            logger.info("Quantité additionnée pour produit ID {} dans commande ID {} : {} → {}",
+                    produit.getIdProduit(), commande.getIdCommande(), cp.getQuantite() - commandeProduit.getQuantite(), nouvelleQuantite);
+
+            if (produit.getStock() < SEUIL_STOCK_BAS) {
+                logger.warn("Stock bas pour le produit {} : {} unités restantes", produit.getNom(), produit.getStock());
+            }
+
+            return saved;
+
+        } else {
+            // Produit pas encore dans la commande → ajout normal
+            if (produit.getStock() < commandeProduit.getQuantite()) {
+                throw new IllegalArgumentException("Stock insuffisant pour " + produit.getNom());
+            }
+
+            produit.setStock(produit.getStock() - commandeProduit.getQuantite());
+            produitRepository.save(produit);
+
+            commandeProduit.setCommande(commande);
+            commandeProduit.setProduit(produit);
+            commandeProduit.setPrixTotal(produit.getPrix().multiply(BigDecimal.valueOf(commandeProduit.getQuantite())));
+
+            CommandeProduit saved = commandeProduitRepository.saveAndFlush(commandeProduit);
+
+            commandeRepository.updateTotalById(commande.getIdCommande());
+
+            logger.info("Nouveau produit ajouté dans commande ID {} : produit ID {}",
+                    saved.getIdCommande(), saved.getIdProduit());
+
+            if (produit.getStock() < SEUIL_STOCK_BAS) {
+                logger.warn("Stock bas pour le produit {} : {} unités restantes", produit.getNom(), produit.getStock());
+            }
+
+            return saved;
         }
-        if (produit.getStock() < commandeProduit.getQuantite()) {
-            logger.warn("Stock insuffisant pour le produit ID {} : actuel {}, demandé {}",
-                    produit.getIdProduit(), produit.getStock(), commandeProduit.getQuantite());
-            throw new IllegalArgumentException("Stock insuffisant pour " + produit.getNom());
-        }
-
-        produit.setStock(produit.getStock() - commandeProduit.getQuantite());
-        produitRepository.save(produit);
-
-        commandeProduit.setCommande(commande);
-        commandeProduit.setProduit(produit);
-        commandeProduit.setPrixTotal(produit.getPrix().multiply(BigDecimal.valueOf(commandeProduit.getQuantite())));
-
-        CommandeProduit saved = commandeProduitRepository.saveAndFlush(commandeProduit);
-
-        // Mise à jour du total avec la requête JPQL
-        commandeRepository.updateTotalById(commande.getIdCommande());
-
-        int nouveauStock = produit.getStock();
-        if (nouveauStock < SEUIL_STOCK_BAS) {
-            logger.warn("Stock bas pour le produit {} : {} unités restantes", produit.getNom(), nouveauStock);
-        }
-        logger.info("Ajout d'un élément de commande pour commande ID : {} et produit ID : {}",
-                saved.getIdCommande(), saved.getIdProduit());
-        return saved;
     }
 
     public List<CommandeProduit> getAllCommandeProduits() {
@@ -101,9 +141,9 @@ public class GestionCommandeProduit {
         return commandeProduitRepository.findById(id).map(commandeProduit -> {
             Produit produit = produitRepository.findById(commandeProduit.getIdProduit())
                     .orElseThrow(() -> new IllegalArgumentException("Produit introuvable"));
-            if (commandeProduitModifie.getQuantite() < 0) {
-                logger.warn("Tentative de modification avec quantité négative : {}", commandeProduitModifie.getQuantite());
-                throw new IllegalArgumentException("La quantité ne peut pas être négative");
+            if (commandeProduitModifie.getQuantite() <= 0) {
+                logger.warn("Tentative de modification avec quantité invalide : {}", commandeProduitModifie.getQuantite());
+                throw new IllegalArgumentException("La quantité doit être supérieure à zéro");
             }
             int stockApresModification = produit.getStock() + commandeProduit.getQuantite() - commandeProduitModifie.getQuantite();
             if (stockApresModification < 0) {
@@ -160,59 +200,96 @@ public class GestionCommandeProduit {
             throw new IllegalArgumentException("La liste des commandes produits ne peut pas être vide ou null.");
         }
 
-        List<CommandeProduit> savedProduits = commandeProduits.stream().map(commandeProduit -> {
+        // Étape 1 : Regrouper par (idCommande, idProduit) et additionner les quantités
+        Map<CommandeProduitId, CommandeProduit> grouped = new HashMap<>();
+
+        for (CommandeProduit cp : commandeProduits) {
+            if (cp.getIdCommande() == null || cp.getIdProduit() == null || cp.getQuantite() <= 0) {
+                throw new IllegalArgumentException("ID ou quantité invalide : " + cp);
+            }
+
+            CommandeProduitId key = new CommandeProduitId(cp.getIdCommande(), cp.getIdProduit());
+
+            grouped.merge(key, cp, (existing, incoming) -> {
+                existing.setQuantite(existing.getQuantite() + incoming.getQuantite());
+                return existing;
+            });
+        }
+
+        // Étape 2 : Traiter chaque groupe (un produit unique dans une commande)
+        List<CommandeProduit> savedProduits = new ArrayList<>();
+
+        for (Map.Entry<CommandeProduitId, CommandeProduit> entry : grouped.entrySet()) {
+            CommandeProduitId id = entry.getKey();
+            CommandeProduit cp = entry.getValue();
+
             try {
-                // Vérification des IDs
-                if (commandeProduit.getIdCommande() == null || commandeProduit.getIdProduit() == null) {
-                    throw new IllegalArgumentException("Les IDs de commande et de produit doivent être spécifiés pour l'élément : " + commandeProduit);
+                // Récupérer commande et produit
+                Commande commande = commandeRepository.findById(id.getIdCommande())
+                        .orElseThrow(() -> new IllegalArgumentException("Commande introuvable : " + id.getIdCommande()));
+
+                Produit produit = produitRepository.findById(id.getIdProduit())
+                        .orElseThrow(() -> new IllegalArgumentException("Produit introuvable : " + id.getIdProduit()));
+
+                // Vérifier si déjà en base
+                Optional<CommandeProduit> existingOpt = commandeProduitRepository.findById(id);
+                int quantiteTotale = cp.getQuantite();
+
+                if (existingOpt.isPresent()) {
+                    // Produit déjà dans la commande → on additionne
+                    CommandeProduit existing = existingOpt.get();
+                    quantiteTotale = existing.getQuantite() + cp.getQuantite();
+
+                    // Vérifier le stock total
+                    if (produit.getStock() < cp.getQuantite()) {
+                        throw new IllegalArgumentException(
+                                "Stock insuffisant pour ajouter " + cp.getQuantite() +
+                                        " unités de " + produit.getNom() + ". Stock actuel : " + produit.getStock()
+                        );
+                    }
+
+                    // Mettre à jour
+                    produit.setStock(produit.getStock() - cp.getQuantite());
+                    existing.setQuantite(quantiteTotale);
+                    existing.setPrixTotal(produit.getPrix().multiply(BigDecimal.valueOf(quantiteTotale)));
+
+                    CommandeProduit saved = commandeProduitRepository.saveAndFlush(existing);
+                    savedProduits.add(saved);
+
+                    logger.info("Quantité additionnée : produit ID {} dans commande ID {} → {} unités",
+                            produit.getIdProduit(), commande.getIdCommande(), quantiteTotale);
+                } else {
+                    // Nouveau produit dans la commande
+                    if (produit.getStock() < quantiteTotale) {
+                        throw new IllegalArgumentException("Stock insuffisant pour " + produit.getNom());
+                    }
+
+                    produit.setStock(produit.getStock() - quantiteTotale);
+                    produitRepository.save(produit);
+
+                    cp.setCommande(commande);
+                    cp.setProduit(produit);
+                    cp.setPrixTotal(produit.getPrix().multiply(BigDecimal.valueOf(quantiteTotale)));
+
+                    CommandeProduit saved = commandeProduitRepository.saveAndFlush(cp);
+                    savedProduits.add(saved);
+
+                    logger.info("Nouveau produit ajouté : ID {} dans commande ID {}", produit.getIdProduit(), commande.getIdCommande());
                 }
-
-                // Vérification de l'existence de la commande et du produit
-                Commande commande = commandeRepository.findById(commandeProduit.getIdCommande())
-                        .orElseThrow(() -> new IllegalArgumentException("Commande introuvable : " + commandeProduit.getIdCommande()));
-                Produit produit = produitRepository.findById(commandeProduit.getIdProduit())
-                        .orElseThrow(() -> new IllegalArgumentException("Produit introuvable : " + commandeProduit.getIdProduit()));
-
-                // Validation de la quantité
-                if (commandeProduit.getQuantite() < 0) {
-                    logger.warn("Tentative d'ajout avec quantité négative : {}", commandeProduit.getQuantite());
-                    throw new IllegalArgumentException("La quantité ne peut pas être négative pour l'élément : " + commandeProduit);
-                }
-
-                // Vérification du stock
-                if (produit.getStock() < commandeProduit.getQuantite()) {
-                    logger.warn("Stock insuffisant pour le produit ID {} : actuel {}, demandé {}",
-                            produit.getIdProduit(), produit.getStock(), commandeProduit.getQuantite());
-                    throw new IllegalArgumentException("Stock insuffisant pour " + produit.getNom() + " dans l'élément : " + commandeProduit);
-                }
-
-                // Mise à jour du stock
-                produit.setStock(produit.getStock() - commandeProduit.getQuantite());
-                produitRepository.save(produit);
-
-                // Configuration des relations et calcul du prix total
-                commandeProduit.setCommande(commande);
-                commandeProduit.setProduit(produit);
-                commandeProduit.setPrixTotal(produit.getPrix().multiply(BigDecimal.valueOf(commandeProduit.getQuantite())));
-
-                // Enregistrement de l'élément
-                CommandeProduit saved = commandeProduitRepository.save(commandeProduit);
 
                 // Mise à jour du total de la commande
                 commandeRepository.updateTotalById(commande.getIdCommande());
 
-                int nouveauStock = produit.getStock();
-                if (nouveauStock < SEUIL_STOCK_BAS) {
-                    logger.warn("Stock bas pour le produit {} : {} unités restantes", produit.getNom(), nouveauStock);
+                // Alerte stock bas
+                if (produit.getStock() < SEUIL_STOCK_BAS) {
+                    logger.warn("Stock bas pour le produit {} : {} unités restantes", produit.getNom(), produit.getStock());
                 }
-                logger.info("Ajout d'un élément de commande pour commande ID : {} et produit ID : {}",
-                        saved.getIdCommande(), saved.getIdProduit());
-                return saved;
+
             } catch (Exception e) {
-                logger.error("Erreur lors de l'ajout d'un élément de commande : {}", e.getMessage());
-                throw e; // Rejette la transaction si une erreur survient
+                logger.error("Erreur lors du traitement de l'élément : {}", e.getMessage());
+                throw e; // Annule toute la transaction
             }
-        }).collect(Collectors.toList());
+        }
 
         return savedProduits;
     }

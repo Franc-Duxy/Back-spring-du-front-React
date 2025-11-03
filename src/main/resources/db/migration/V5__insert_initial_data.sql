@@ -6,8 +6,7 @@ INSERT INTO public.utilisateur (nom, email, mdp, role) VALUES
                                                            ('Johny', 'joh@gmail.com', crypt('admin123', gen_salt('bf')), 'ADMIN'),
                                                            ('Vie', 'vie@gmail.com', crypt('caisse123', gen_salt('bf')), 'CAISSIER'),
                                                            ('Xavier', 'xavier@gmail.com', crypt('admin456', gen_salt('bf')), 'ADMIN'),
-                                                           ('Alice', 'alice@gmail.com', crypt('caisse456', gen_salt('bf')), 'CAISSIER'),
-                                                           ('Nouveau', 'nouveau@exemple.com', crypt('motdepasse123', gen_salt('bf')), 'CAISSIER');
+                                                           ('Alice', 'alice@gmail.com', crypt('caisse456', gen_salt('bf')), 'CAISSIER');
 
 INSERT INTO public.produit (nom, prix, stock) VALUES
                                                   ('Tableaux', 250.00, 200),
