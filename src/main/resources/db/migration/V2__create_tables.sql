@@ -4,7 +4,7 @@
 CREATE SEQUENCE public.utilisateur_id_utilisateur_seq
     START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1;
 
-CREATE TABLE public.utilisateur (
+CREATE TABLE IF NOT EXISTS public.utilisateur (
                                     id_utilisateur INTEGER PRIMARY KEY DEFAULT nextval('public.utilisateur_id_utilisateur_seq'),
                                     nom VARCHAR(255),
                                     email VARCHAR(255) UNIQUE,
@@ -16,9 +16,9 @@ CREATE TABLE public.utilisateur (
 CREATE SEQUENCE public.produit_id_produit_seq
     START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1;
 
-CREATE TABLE public.produit (
+CREATE TABLE IF NOT EXISTS public.produit (
                                 id_produit INTEGER PRIMARY KEY DEFAULT nextval('public.produit_id_produit_seq'),
-                                nom VARCHAR(100),
+                                nom VARCHAR(100) UNIQUE,
                                 prix NUMERIC(15,2),
                                 stock INTEGER DEFAULT 0
 );
@@ -27,7 +27,7 @@ CREATE TABLE public.produit (
 CREATE SEQUENCE public.commande_id_commande_seq
     START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1;
 
-CREATE TABLE public.commande (
+CREATE TABLE IF NOT EXISTS public.commande (
                                  id_commande INTEGER PRIMARY KEY DEFAULT nextval('public.commande_id_commande_seq'),
                                  id_acheteur INTEGER,
                                  total NUMERIC(15,2) DEFAULT 0,
@@ -37,7 +37,7 @@ CREATE TABLE public.commande (
 );
 
 -- Table commande_produit
-CREATE TABLE public.commande_produit (
+CREATE TABLE IF NOT EXISTS public.commande_produit (
                                          id_commande INTEGER NOT NULL,
                                          id_produit INTEGER NOT NULL,
                                          quantite INTEGER,
@@ -51,7 +51,7 @@ CREATE TABLE public.commande_produit (
 CREATE SEQUENCE public.paiement_id_paiement_seq
     START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1;
 
-CREATE TABLE public.paiement (
+CREATE TABLE IF NOT EXISTS public.paiement (
                                  id_paiement INTEGER PRIMARY KEY DEFAULT nextval('public.paiement_id_paiement_seq'),
                                  id_commande INTEGER UNIQUE,
                                  montant NUMERIC(15,2),
